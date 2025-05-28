@@ -9,9 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
 	"github.com/sv-tools/openapi/spec"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // OperationV3 describes a single API operation on a path.
@@ -153,7 +152,7 @@ func (o *OperationV3) ParseAcceptComment(commentLine string) error {
 
 	validTypes, err := parseMimeTypeListV3(commentLine, "%v accept type can't be accepted")
 	if err != nil {
-		return errors.Wrap(err, errMessage)
+		return fmt.Errorf("%s: %w", errMessage, err)
 	}
 
 	if o.RequestBody == nil {
@@ -175,7 +174,7 @@ func (o *OperationV3) ParseAcceptComment(commentLine string) error {
 
 		switch value {
 		case "application/json", "multipart/form-data", "text/xml":
-			schema.Spec.Type = spec.NewSingleOrArray(OBJECT)
+			schema.Spec.Type = &spec.SingleOrArray[string]{OBJECT}
 		case "image/png",
 			"image/jpeg",
 			"image/gif",
@@ -186,10 +185,10 @@ func (o *OperationV3) ParseAcceptComment(commentLine string) error {
 			"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 			"application/vnd.openxmlformats-officedocument.presentationml.presentation":
-			schema.Spec.Type = spec.NewSingleOrArray(STRING)
+			schema.Spec.Type = &spec.SingleOrArray[string]{STRING}
 			schema.Spec.Format = "binary"
 		default:
-			schema.Spec.Type = spec.NewSingleOrArray(STRING)
+			schema.Spec.Type = &spec.SingleOrArray[string]{STRING}
 		}
 
 		mediaType.Spec.Schema = schema
@@ -205,7 +204,7 @@ func (o *OperationV3) ParseProduceComment(commentLine string) error {
 
 	validTypes, err := parseMimeTypeListV3(commentLine, "%v produce type can't be accepted")
 	if err != nil {
-		return errors.Wrap(err, errMessage)
+		return fmt.Errorf("%s: %w", errMessage, err)
 	}
 
 	o.responseMimeTypes = validTypes
@@ -229,7 +228,7 @@ func (o *OperationV3) ProcessProduceComment() error {
 		for key, response := range o.Responses.Spec.Response {
 			code, err := strconv.Atoi(key)
 			if err != nil {
-				return errors.Wrap(err, errMessage)
+				return fmt.Errorf("%s: %w", errMessage, err)
 			}
 
 			// Status 204 is no content. So we do not need to add content.
@@ -253,7 +252,7 @@ func (o *OperationV3) ProcessProduceComment() error {
 
 			switch value {
 			case "application/json", "multipart/form-data", "text/xml":
-				schema.Spec.Type = spec.NewSingleOrArray(OBJECT)
+				schema.Spec.Type = &spec.SingleOrArray[string]{OBJECT}
 			case "image/png",
 				"image/jpeg",
 				"image/gif",
@@ -264,10 +263,10 @@ func (o *OperationV3) ProcessProduceComment() error {
 				"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 				"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 				"application/vnd.openxmlformats-officedocument.presentationml.presentation":
-				schema.Spec.Type = spec.NewSingleOrArray(STRING)
+				schema.Spec.Type = &spec.SingleOrArray[string]{STRING}
 				schema.Spec.Format = "binary"
 			default:
-				schema.Spec.Type = spec.NewSingleOrArray(STRING)
+				schema.Spec.Type = &spec.SingleOrArray[string]{STRING}
 			}
 
 			mediaType.Spec.Schema = schema
@@ -347,7 +346,7 @@ func (o *OperationV3) ParseParamComment(commentLine string, astFile *ast.File) e
 			if objectType == OBJECT {
 				objectType = PRIMITIVE
 			}
-			refType = TransToValidSchemeType(schema.Spec.Type[0])
+			refType = TransToValidSchemeType((*schema.Spec.Type)[0])
 			enums = schema.Spec.Enum
 		}
 	}
@@ -388,22 +387,22 @@ func (o *OperationV3) ParseParamComment(commentLine string, astFile *ast.File) e
 
 			for name, item := range schema.Spec.Properties {
 				prop := item.Spec
-				if len(prop.Type) == 0 {
+				if len(*prop.Type) == 0 {
 					continue
 				}
 
 				itemParam := param // Avoid shadowed variable which could cause side effects to o.Operation.Parameters
 
 				switch {
-				case prop.Type[0] == ARRAY &&
+				case (*prop.Type)[0] == ARRAY &&
 					prop.Items.Schema != nil &&
-					len(prop.Items.Schema.Spec.Type) > 0 &&
-					IsSimplePrimitiveType(prop.Items.Schema.Spec.Type[0]):
+					len(*prop.Items.Schema.Spec.Type) > 0 &&
+					IsSimplePrimitiveType((*prop.Items.Schema.Spec.Type)[0]):
 
-					itemParam = createParameterV3(paramType, prop.Description, name, prop.Type[0], prop.Items.Schema.Spec.Type[0], findInSlice(schema.Spec.Required, name), enums, o.parser.collectionFormatInQuery)
+					itemParam = createParameterV3(paramType, prop.Description, name, (*prop.Type)[0], (*prop.Items.Schema.Spec.Type)[0], findInSlice(schema.Spec.Required, name), enums, o.parser.collectionFormatInQuery)
 
-				case IsSimplePrimitiveType(prop.Type[0]):
-					itemParam = createParameterV3(paramType, prop.Description, name, PRIMITIVE, prop.Type[0], findInSlice(schema.Spec.Required, name), enums, o.parser.collectionFormatInQuery)
+				case IsSimplePrimitiveType((*prop.Type)[0]):
+					itemParam = createParameterV3(paramType, prop.Description, name, PRIMITIVE, (*prop.Type)[0], findInSlice(schema.Spec.Required, name), enums, o.parser.collectionFormatInQuery)
 				default:
 					o.parser.debug.Printf("skip field [%s] in %s is not supported type for %s", name, refType, paramType)
 
@@ -715,7 +714,7 @@ func (o *OperationV3) parseAPIObjectSchema(commentLine, schemaType, refType stri
 		}
 
 		result := spec.NewSchemaSpec()
-		result.Spec.Type = spec.NewSingleOrArray("array")
+		result.Spec.Type = &spec.SingleOrArray[string]{ARRAY}
 		result.Spec.Items = spec.NewBoolOrSchema(false, schema) // TODO: allowed?
 		return result, nil
 
@@ -775,12 +774,12 @@ func createParameterV3(in, description, paramName, objectType, schemaType string
 
 	switch objectType {
 	case ARRAY:
-		result.Schema.Spec.Type = spec.NewSingleOrArray(objectType)
+		result.Schema.Spec.Type = &spec.SingleOrArray[string]{objectType}
 		result.Schema.Spec.Items = spec.NewBoolOrSchema(false, spec.NewSchemaSpec())
-		result.Schema.Spec.Items.Schema.Spec.Type = spec.NewSingleOrArray(schemaType)
+		result.Schema.Spec.Items.Schema.Spec.Type = &spec.SingleOrArray[string]{schemaType}
 		result.Schema.Spec.Enum = enums
 	case PRIMITIVE, OBJECT:
-		result.Schema.Spec.Type = spec.NewSingleOrArray(schemaType)
+		result.Schema.Spec.Type = &spec.SingleOrArray[string]{schemaType}
 		result.Schema.Spec.Enum = enums
 	}
 
@@ -812,7 +811,7 @@ func parseObjectSchemaV3(parser *Parser, refType string, astFile *ast.File) (*sp
 		}
 
 		result := spec.NewSchemaSpec()
-		result.Spec.Type = spec.NewSingleOrArray("array")
+		result.Spec.Type = &spec.SingleOrArray[string]{ARRAY}
 		result.Spec.Items = spec.NewBoolOrSchema(false, schema)
 
 		return result, nil
@@ -827,7 +826,7 @@ func parseObjectSchemaV3(parser *Parser, refType string, astFile *ast.File) (*sp
 		if refType == INTERFACE || refType == ANY {
 			schema := &spec.Schema{}
 			schema.AdditionalProperties = spec.NewBoolOrSchema(false, spec.NewSchemaSpec())
-			schema.Type = spec.NewSingleOrArray(OBJECT)
+			schema.Type = &spec.SingleOrArray[string]{OBJECT}
 			refOrSpec := spec.NewRefOrSpec(nil, schema)
 			return refOrSpec, nil
 		}
@@ -839,7 +838,7 @@ func parseObjectSchemaV3(parser *Parser, refType string, astFile *ast.File) (*sp
 
 		result := &spec.Schema{}
 		result.AdditionalProperties = spec.NewBoolOrSchema(false, schema)
-		result.Type = spec.NewSingleOrArray(OBJECT)
+		result.Type = &spec.SingleOrArray[string]{OBJECT}
 		refOrSpec := spec.NewSchemaSpec()
 		refOrSpec.Spec = result
 
@@ -917,7 +916,7 @@ func newHeaderSpecV3(schemaType, description string) *spec.RefOrSpec[spec.Extend
 	result := spec.NewHeaderSpec()
 	result.Spec.Spec.Description = description
 	result.Spec.Spec.Schema = spec.NewSchemaSpec()
-	result.Spec.Spec.Schema.Spec.Type = spec.NewSingleOrArray(schemaType)
+	result.Spec.Spec.Schema.Spec.Type = &spec.SingleOrArray[string]{schemaType}
 
 	return result
 }
@@ -1131,8 +1130,8 @@ func parseCombinedObjectSchemaV3(parser *Parser, refType string, astFile *ast.Fi
 	}
 
 	if schema.Ref == nil &&
-		len(schema.Spec.Type) > 0 &&
-		schema.Spec.Type[0] == OBJECT &&
+		len(*schema.Spec.Type) > 0 &&
+		(*schema.Spec.Type)[0] == OBJECT &&
 		len(schema.Spec.Properties) == 0 &&
 		schema.Spec.AdditionalProperties == nil {
 		schema.Spec.Properties = props
@@ -1147,7 +1146,7 @@ func parseCombinedObjectSchemaV3(parser *Parser, refType string, astFile *ast.Fi
 	for name, prop := range props {
 		wrapperSpec := spec.NewSchemaSpec()
 		wrapperSpec.Spec = &spec.Schema{}
-		wrapperSpec.Spec.Type = spec.NewSingleOrArray(OBJECT)
+		wrapperSpec.Spec.Type = &spec.SingleOrArray[string]{OBJECT}
 		wrapperSpec.Spec.Properties = map[string]*spec.RefOrSpec[spec.Schema]{
 			name: prop,
 		}
